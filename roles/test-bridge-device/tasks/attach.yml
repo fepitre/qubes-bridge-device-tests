@@ -1,0 +1,73 @@
+---
+# Tests: live attach/detach, auto-generated MAC format.
+#
+# Uses test_vm_a1 which must be running. Detaches any existing bridge first
+# so the test starts from a clean state, then restores it afterwards.
+
+- name: "[attach] detach existing bridge from {{ test_vm_a1 }} if attached (setup)"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ test_vm_a1 }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+  register: pre_detach
+  failed_when: false
+  changed_when: pre_detach.rc == 0
+
+- name: "[attach] attach bridge to running VM"
+  ansible.builtin.command: >
+    qvm-device bridge attach {{ test_vm_a1 }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+
+- name: "[attach] attached device appears in global device list"
+  ansible.builtin.command: qvm-device bridge list
+  register: bridge_list
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_vm_a1 in bridge_list.stdout
+      - test_bridge_a in bridge_list.stdout
+    fail_msg: "{{ test_vm_a1 }} not shown as attached in device list. Output: {{ bridge_list.stdout }}"
+    success_msg: "OK -- {{ test_vm_a1 }} shows as attached"
+
+- name: "[attach] attached interface has a valid MAC (Xen OUI 00:16:3e)"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a1 }}
+    'ip link show eth0'
+  register: ip_link
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - "'00:16:3e' in ip_link.stdout"
+    fail_msg: "Expected Xen OUI 00:16:3e in eth0 MAC. ip link: {{ ip_link.stdout }}"
+    success_msg: "OK -- eth0 has Xen OUI MAC"
+
+- name: "[attach] eth0 is present and UP in frontend VM"
+  ansible.builtin.assert:
+    that:
+      - "'eth0' in ip_link.stdout"
+      - "'UP' in ip_link.stdout"
+    fail_msg: "eth0 not UP. ip link: {{ ip_link.stdout }}"
+    success_msg: "OK -- eth0 is UP"
+
+- name: "[attach] detach bridge from VM"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ test_vm_a1 }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+
+- name: "[attach] device no longer listed as attached after detach"
+  ansible.builtin.command: qvm-device bridge list
+  register: bridge_list_after
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_vm_a1 not in bridge_list_after.stdout or test_bridge_a not in bridge_list_after.stdout
+    fail_msg: "{{ test_vm_a1 }} still shows attached after detach. Output: {{ bridge_list_after.stdout }}"
+    success_msg: "OK -- {{ test_vm_a1 }} no longer attached"
+
+- name: "[attach] re-attach bridge (restore testbed state)"
+  ansible.builtin.command: >
+    qvm-device bridge attach {{ test_vm_a1 }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+  when: pre_detach.rc != 0

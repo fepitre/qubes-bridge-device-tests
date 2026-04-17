@@ -1,0 +1,95 @@
+---
+# Tests: L2 connectivity within a bridge and isolation between bridges.
+#
+# Requires VMs to be running with eth0 configured (bridge-eth0-up.sh).
+# Expects ping at ping_bin (/usr/local/bin/ping).
+
+- name: "[isolation] ensure all test VMs are running"
+  ansible.builtin.command: qvm-check --running {{ item }}
+  loop:
+    - "{{ test_vm_a1 }}"
+    - "{{ test_vm_a2 }}"
+    - "{{ test_vm_a3 }}"
+    - "{{ test_vm_b1 }}"
+  changed_when: false
+
+# same bridge: should reach
+# Retry because NM needs a moment to bring up eth0 after a hot-attach.
+
+- name: "[isolation] ping {{ test_vm_a2 }} from {{ test_vm_a1 }} (same bridge)"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a1 }}
+    '{{ ping_bin }} -c3 -W1 {{ test_ip_a2 }} 2>&1'
+  register: ping_same
+  until: "'0% packet loss' in ping_same.stdout"
+  retries: 15
+  delay: 2
+  changed_when: false
+  failed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - "'0% packet loss' in ping_same.stdout"
+    fail_msg: >-
+      Ping between VMs on the same bridge failed.
+      {{ test_vm_a1 }}({{ test_ip_a1 }}) -> {{ test_vm_a2 }}({{ test_ip_a2 }}).
+      Output: {{ ping_same.stdout }}
+    success_msg: "OK -- same-bridge ping succeeds (0% loss)"
+
+- name: "[isolation] ping {{ test_vm_a1 }} from {{ test_vm_a2 }} (reverse, same bridge)"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a2 }}
+    '{{ ping_bin }} -c3 -W1 {{ test_ip_a1 }} 2>&1'
+  register: ping_reverse
+  until: "'0% packet loss' in ping_reverse.stdout"
+  retries: 15
+  delay: 2
+  changed_when: false
+  failed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - "'0% packet loss' in ping_reverse.stdout"
+    fail_msg: >-
+      Reverse ping failed. Output: {{ ping_reverse.stdout }}
+    success_msg: "OK -- reverse same-bridge ping succeeds"
+
+# different bridge, same backend: must not reach
+
+- name: "[isolation] ping {{ test_ip_a3 }} from {{ test_vm_a1 }} (different bridge, same backend)"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a1 }}
+    '{{ ping_bin }} -c2 -W1 {{ test_ip_a3 }} 2>&1; true'
+  register: ping_diff_bridge
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - "'unreachable' in ping_diff_bridge.stdout | lower
+         or '100% packet loss' in ping_diff_bridge.stdout
+         or 'Network is unreachable' in ping_diff_bridge.stdout"
+    fail_msg: >-
+      Cross-bridge ping should be blocked but succeeded.
+      {{ test_vm_a1 }}({{ test_ip_a1 }}) -> {{ test_ip_a3 }} ({{ test_bridge_a_2 }}).
+      Output: {{ ping_diff_bridge.stdout }}
+    success_msg: "OK -- cross-bridge ping blocked (same backend)"
+
+# different backend: must not reach
+
+- name: "[isolation] ping {{ test_ip_b1 }} from {{ test_vm_a1 }} (different backend)"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a1 }}
+    '{{ ping_bin }} -c2 -W1 {{ test_ip_b1 }} 2>&1; true'
+  register: ping_diff_backend
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - "'unreachable' in ping_diff_backend.stdout | lower
+         or '100% packet loss' in ping_diff_backend.stdout
+         or 'Network is unreachable' in ping_diff_backend.stdout"
+    fail_msg: >-
+      Cross-backend ping should be blocked but succeeded.
+      {{ test_vm_a1 }}({{ test_ip_a1 }}) -> {{ test_ip_b1 }} ({{ test_backend_b }}:{{ test_bridge_b }}).
+      Output: {{ ping_diff_backend.stdout }}
+    success_msg: "OK -- cross-backend ping blocked"

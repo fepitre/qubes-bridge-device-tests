@@ -1,0 +1,146 @@
+---
+# Tests: persistent assignment (assign, auto-attach on start, unassign).
+#
+# Uses a dedicated test VM (test_vm_a3 / test_bridge_a_2) so it does not
+# interfere with the VMs used by other test files.
+
+- name: "[persistence] unassign {{ test_bridge_a_2 }} from {{ test_vm_a3 }} if already assigned (setup)"
+  ansible.builtin.command: >
+    qvm-device bridge unassign {{ test_vm_a3 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+  register: pre_unassign
+  failed_when: false
+  changed_when: pre_unassign.rc == 0
+
+- name: "[persistence] detach {{ test_bridge_a_2 }} from {{ test_vm_a3 }} if attached (setup)"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ test_vm_a3 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+  register: pre_detach
+  failed_when: false
+  changed_when: pre_detach.rc == 0
+
+# assign
+
+- name: "[persistence] assign bridge device to VM"
+  ansible.builtin.command: >
+    qvm-device bridge assign {{ test_vm_a3 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+
+- name: "[persistence] assigned device appears in assigned list"
+  ansible.builtin.command: qvm-device bridge list
+  register: bridge_list
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_bridge_a_2 in bridge_list.stdout
+    fail_msg: "Assigned bridge not visible. Output: {{ bridge_list.stdout }}"
+    success_msg: "OK -- {{ test_backend_a }}:{{ test_bridge_a_2 }} is listed"
+
+# auto-attach on VM start
+
+- name: "[persistence] shut down {{ test_vm_a3 }} before restart test"
+  ansible.builtin.command: qvm-shutdown --wait {{ test_vm_a3 }}
+  register: shutdown_vm
+  failed_when: false
+  changed_when: true
+
+- name: "[persistence] start {{ test_vm_a3 }} -- bridge should auto-attach"
+  ansible.builtin.command: qvm-start {{ test_vm_a3 }}
+
+- name: "[persistence] wait for VM to be running"
+  ansible.builtin.command: qvm-check --running {{ test_vm_a3 }}
+  register: vm_running
+  until: vm_running.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: false
+
+- name: "[persistence] bridge is attached after VM start"
+  ansible.builtin.command: qvm-device bridge list
+  register: bridge_list_after_start
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_vm_a3 in bridge_list_after_start.stdout
+      - test_bridge_a_2 in bridge_list_after_start.stdout
+    fail_msg: >-
+      Bridge not auto-attached after VM start.
+      Output: {{ bridge_list_after_start.stdout }}
+    success_msg: "OK -- bridge auto-attached on VM start"
+
+- name: "[persistence] eth0 is present in VM after auto-attach"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a3 }}
+    'ip link show eth0'
+  register: eth0_link
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - "'eth0' in eth0_link.stdout"
+    fail_msg: "eth0 not present in {{ test_vm_a3 }} after auto-attach. ip link: {{ eth0_link.stdout }}"
+    success_msg: "OK -- eth0 present after auto-attach"
+
+# unassign
+
+- name: "[persistence] unassign bridge device from VM"
+  ansible.builtin.command: >
+    qvm-device bridge unassign {{ test_vm_a3 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+
+- name: "[persistence] detach bridge (unassign does not detach live device)"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ test_vm_a3 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+  failed_when: false
+
+- name: "[persistence] shut down {{ test_vm_a3 }}"
+  ansible.builtin.command: qvm-shutdown --wait {{ test_vm_a3 }}
+  changed_when: true
+
+- name: "[persistence] start {{ test_vm_a3 }} -- bridge must NOT auto-attach"
+  ansible.builtin.command: qvm-start {{ test_vm_a3 }}
+
+- name: "[persistence] wait for VM to be running"
+  ansible.builtin.command: qvm-check --running {{ test_vm_a3 }}
+  register: vm_running2
+  until: vm_running2.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: false
+
+- name: "[persistence] bridge is NOT attached after unassign + restart"
+  ansible.builtin.command: qvm-device bridge list
+  register: bridge_list_after_unassign
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_vm_a3 not in bridge_list_after_unassign.stdout
+    fail_msg: >-
+      Bridge still attached after unassign + restart.
+      Output: {{ bridge_list_after_unassign.stdout }}
+    success_msg: "OK -- bridge not attached after unassign"
+
+- name: "[persistence] eth0 is absent after unassign + restart"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a3 }}
+    'ip link show eth0 2>&1; true'
+  register: eth0_gone
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - "'eth0' not in eth0_gone.stdout or 'does not exist' in eth0_gone.stdout"
+    fail_msg: "eth0 still present after unassign + restart: {{ eth0_gone.stdout }}"
+    success_msg: "OK -- eth0 absent after unassign"
+
+# Restore: re-assign so testbed is back to baseline
+- name: "[persistence] restore testbed -- re-assign {{ test_bridge_a_2 }} to {{ test_vm_a3 }}"
+  ansible.builtin.command: >
+    qvm-device bridge assign {{ test_vm_a3 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+  when: pre_unassign.rc != 0

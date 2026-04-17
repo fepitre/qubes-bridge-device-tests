@@ -1,0 +1,117 @@
+---
+# Tear down everything created by the main.yml and deploy.yml playbooks.
+#
+# Run from dom0:
+#   ansible-playbook playbooks/cleanup.yml
+#
+# What this removes:
+#   dom0: RPC policy, editable admin extension install
+#   Qubes: all bridge assignments and attachments, test AppVMs, backend VMs
+#
+# Selective tags:
+#   --tags detach     detach/unassign bridge devices only
+#   --tags vms        destroy test VMs and backend VMs
+#   --tags dom0       remove policy and uninstall admin extension
+
+- name: Clean up bridge device testbed
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+
+  vars:
+    backend_vms:
+      - net-interfaces
+      - net-interfaces-bis
+    test_vms:
+      - testvm1
+      - testvm2
+      - testvm3
+      - testvm4
+      - testvm5
+      - testvm6
+
+  tasks:
+
+    # Detach and unassign bridge devices from every test VM so qubes.xml
+    # does not reference VMs or bridges that no longer exist.
+    - name: Detach all bridge devices from test VMs
+      ansible.builtin.command: >
+        qvm-device bridge detach {{ item }}
+      loop: "{{ test_vms }}"
+      register: _detach
+      failed_when: false
+      changed_when: _detach.rc == 0
+      tags: [detach]
+
+    - name: Unassign all bridge devices from test VMs
+      ansible.builtin.command: >
+        qvm-device bridge unassign {{ item }}
+      loop: "{{ test_vms }}"
+      register: _unassign
+      failed_when: false
+      changed_when: _unassign.rc == 0
+      tags: [detach]
+
+    # Shut down and destroy test AppVMs.
+    - name: Shut down test AppVMs
+      ansible.builtin.command: qvm-shutdown --wait {{ item }}
+      loop: "{{ test_vms }}"
+      register: _shutdown_test
+      failed_when: false
+      changed_when: true
+      tags: [vms]
+
+    - name: Destroy test AppVMs
+      ansible.builtin.command: qvm-remove --force {{ item }}
+      loop: "{{ test_vms }}"
+      register: _remove_test
+      failed_when: false
+      changed_when: _remove_test.rc == 0
+      tags: [vms]
+
+    # Shut down and destroy backend StandaloneVMs.
+    - name: Shut down backend VMs
+      ansible.builtin.command: qvm-shutdown --wait {{ item }}
+      loop: "{{ backend_vms }}"
+      register: _shutdown_backend
+      failed_when: false
+      changed_when: true
+      tags: [vms]
+
+    - name: Destroy backend VMs
+      ansible.builtin.command: qvm-remove --force {{ item }}
+      loop: "{{ backend_vms }}"
+      register: _remove_backend
+      failed_when: false
+      changed_when: _remove_backend.rc == 0
+      tags: [vms]
+
+    # Remove RPC policy installed by testbed-dom0 role.
+    - name: Remove bridge device RPC policy
+      ansible.builtin.file:
+        path: "{{ qubes_policy_dir }}/90-admin-bridge-device.policy"
+        state: absent
+      tags: [dom0]
+
+    # Uninstall editable admin extension installed by deploy-admin role.
+    - name: Uninstall core-admin extension editable install
+      ansible.builtin.command:
+        cmd: python3 setup.py develop --uninstall
+        chdir: "{{ core_admin_src }}"
+      register: _uninstall
+      failed_when: false
+      changed_when: true
+      tags: [dom0]
+
+    # Restart qubesd so the uninstalled entry points are no longer loaded.
+    - name: Restart qubesd after extension removal
+      ansible.builtin.systemd:
+        name: qubesd
+        state: restarted
+      tags: [dom0]
+
+    - name: Wait for qubesd to reinitialise
+      ansible.builtin.pause:
+        seconds: 5
+      tags: [dom0]

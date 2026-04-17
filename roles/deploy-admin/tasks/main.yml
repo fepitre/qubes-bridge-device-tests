@@ -1,0 +1,24 @@
+---
+# Deploy core-admin-addon-bridge-device on dom0.
+#
+# The package registers two entry points that qubesd discovers at startup:
+#   qubes.ext    -> qubesbridgedevice:BridgeDeviceExtension
+#   qubes.devices -> bridge = qubesbridgedevice:BridgeDevice
+
+# Installing in editable mode means code changes are reflected on the next
+# qubesd restart without reinstalling.
+- name: Install core-admin extension in editable mode
+  ansible.builtin.command:
+    cmd: python3 setup.py develop
+    chdir: "{{ core_admin_src }}"
+  changed_when: true
+
+# Restarting qubesd reloads all extensions from entry points.
+- name: Restart qubesd to reload extension entry points
+  ansible.builtin.systemd:
+    name: qubesd
+    state: restarted
+
+- name: Wait for qubesd to reinitialise
+  ansible.builtin.pause:
+    seconds: 5

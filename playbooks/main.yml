@@ -1,0 +1,96 @@
+---
+- name: Populate dynamic inventory from variables
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Add net-interfaces VM to inventory
+      ansible.builtin.add_host:
+        name: "{{ net_interfaces_vm }}"
+        groups: net_interfaces_vms
+        ansible_connection: qubes
+      tags: [always, inventory]
+
+    - name: Add net-interfaces-bis VM to inventory
+      ansible.builtin.add_host:
+        name: "{{ net_interfaces_vm_b }}"
+        groups: net_interfaces_vms
+        ansible_connection: qubes
+      tags: [always, inventory]
+
+    - name: Add test VMs to inventory
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: test_vms
+        ansible_connection: qubes
+      loop: "{{ test_vms }}"
+      tags: [always, inventory]
+
+- name: Create testbed VMs and install RPC policies (dom0)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  roles:
+    - testbed-dom0
+
+- name: Shut down backend VMs before configuring (pre-setup)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  tags: [vm]
+  tasks:
+    - name: Shut down {{ item }} before setup
+      ansible.builtin.command: qvm-shutdown --wait {{ item }}
+      loop:
+        - "{{ net_interfaces_vm }}"
+        - "{{ net_interfaces_vm_b }}"
+      failed_when: false
+      changed_when: true
+
+- name: Configure net-interfaces VM
+  hosts: net_interfaces_vms
+  connection: qubes
+  gather_facts: false
+  remote_user: root
+  tags: [vm]
+  roles:
+    - net-interfaces
+
+- name: Shut down backend VMs after setup
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  tags: [vm]
+  tasks:
+    - name: Shut down {{ item }} after setup
+      ansible.builtin.command: qvm-shutdown --wait {{ item }}
+      loop:
+        - "{{ net_interfaces_vm }}"
+        - "{{ net_interfaces_vm_b }}"
+      failed_when: false
+      changed_when: true
+
+- name: Configure test VMs
+  hosts: test_vms
+  connection: qubes
+  gather_facts: false
+  remote_user: root
+  tags: [vm]
+  roles:
+    - testvm-setup
+
+- name: Shut down test VMs after setup
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  tags: [vm]
+  tasks:
+    - name: Shut down {{ item }} after setup
+      ansible.builtin.command: qvm-shutdown --wait {{ item }}
+      loop: "{{ test_vms }}"
+      failed_when: false
+      changed_when: true

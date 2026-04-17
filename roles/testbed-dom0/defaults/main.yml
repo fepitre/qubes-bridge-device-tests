@@ -1,0 +1,3 @@
+---
+qubes_policy_dir: /etc/qubes/policy.d
+install_policy: true

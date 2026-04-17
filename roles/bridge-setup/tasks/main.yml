@@ -1,0 +1,34 @@
+---
+- name: Ensure /rw/config/NM-system-connections exists
+  ansible.builtin.file:
+    path: /rw/config/NM-system-connections
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure NM bridge connection profile exists for {{ item }}
+  ansible.builtin.template:
+    src: bridge.nmconnection.j2
+    dest: /rw/config/NM-system-connections/{{ item }}.nmconnection
+    owner: root
+    group: root
+    mode: "0600"
+  vars:
+    bridge_name: "{{ item }}"
+  loop: "{{ bridge_setup_names }}"
+
+- name: Reload NM connections
+  ansible.builtin.command: nmcli connection reload
+  changed_when: false
+
+- name: Bring up bridge {{ item }} via NM
+  ansible.builtin.command: nmcli connection up {{ item }}
+  register: nm_up
+  failed_when: nm_up.rc != 0 and 'already active' not in nm_up.stderr | lower
+  changed_when: nm_up.rc == 0
+  loop: "{{ bridge_setup_names }}"
+
+- name: Publish all bridges to QubesDB
+  ansible.builtin.command: /usr/lib/qubes/publish-bridge --all
+  changed_when: true

@@ -1,0 +1,50 @@
+---
+- name: Ensure /usr/lib/qubes exists
+  ansible.builtin.file:
+    path: /usr/lib/qubes
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy publish-bridge script
+  ansible.builtin.copy:
+    src: "{{ core_agent_src }}/network/publish-bridge"
+    dest: /usr/lib/qubes/publish-bridge
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy harden-bridge script
+  ansible.builtin.copy:
+    src: "{{ core_agent_src }}/network/harden-bridge"
+    dest: /usr/lib/qubes/harden-bridge
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy qubes-publish-bridges.service
+  ansible.builtin.copy:
+    src: "{{ core_agent_src }}/systemd/qubes-publish-bridges.service"
+    dest: /usr/lib/systemd/system/qubes-publish-bridges.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable qubes-publish-bridges service
+  ansible.builtin.systemd:
+    name: qubes-publish-bridges
+    enabled: true
+    daemon_reload: true
+
+- name: Check if NetworkManager dispatcher directory exists
+  ansible.builtin.stat:
+    path: /etc/NetworkManager/dispatcher.d/no-wait.d
+  register: _nm_dispatcher
+
+- name: Install NM dispatcher symlink
+  ansible.builtin.file:
+    src: /usr/lib/qubes/publish-bridge
+    dest: /etc/NetworkManager/dispatcher.d/no-wait.d/qubes-bridge
+    state: link
+  when: _nm_dispatcher.stat.exists

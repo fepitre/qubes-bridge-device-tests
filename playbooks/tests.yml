@@ -1,0 +1,46 @@
+---
+# Test playbook for the bridge device addon.
+#
+# Run all tests:
+#   ansible-playbook playbooks/tests.yml
+#
+# Run a specific area:
+#   ansible-playbook playbooks/tests.yml --tags discovery
+#   ansible-playbook playbooks/tests.yml --tags attach
+#   ansible-playbook playbooks/tests.yml --tags options
+#   ansible-playbook playbooks/tests.yml --tags persistence
+#   ansible-playbook playbooks/tests.yml --tags lifecycle
+#   ansible-playbook playbooks/tests.yml --tags isolation
+#   ansible-playbook playbooks/tests.yml --tags hardening
+#
+# Prerequisites: the testbed must be deployed (playbooks/deploy.yml).
+
+- name: Start test VMs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Start backend VMs
+      ansible.builtin.command: qvm-start {{ item }}
+      loop:
+        - "{{ net_interfaces_vm }}"
+        - "{{ net_interfaces_vm_b }}"
+      register: start_backend
+      failed_when: start_backend.rc != 0 and 'already running' not in start_backend.stderr
+      changed_when: start_backend.rc == 0
+
+    - name: Start test VMs
+      ansible.builtin.command: qvm-start {{ item }}
+      loop: "{{ test_vms }}"
+      register: start_test
+      failed_when: start_test.rc != 0 and 'already running' not in start_test.stderr
+      changed_when: start_test.rc == 0
+
+- name: Run bridge device test suite
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  roles:
+    - test-bridge-device

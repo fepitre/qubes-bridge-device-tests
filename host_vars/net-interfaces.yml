@@ -1,0 +1,4 @@
+---
+bridge_setup_names:
+  - br-dev
+  - br-dev-2

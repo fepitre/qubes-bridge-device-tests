@@ -1,0 +1,19 @@
+[connection]
+id=bridge-eth0
+type=ethernet
+interface-name=eth0
+autoconnect=true
+
+[ethernet]
+
+[ipv4]
+{% if testvm_eth0_ip | length > 0 %}
+method=manual
+address1={{ testvm_eth0_ip }}
+{% else %}
+method=disabled
+{% endif %}
+
+[ipv6]
+method=disabled
+addr-gen-mode=default

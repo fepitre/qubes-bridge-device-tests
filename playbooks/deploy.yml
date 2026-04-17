@@ -1,0 +1,104 @@
+---
+# Day-to-day deploy playbook for bridge device addon development.
+#
+# Run from dom0:
+#   ansible-playbook playbooks/deploy.yml
+#
+# Selective runs with tags:
+#   --tags agent   deploy only core-agent changes to net-interfaces
+#   --tags admin   deploy only core-admin changes to dom0 + restart qubesd
+#   --tags bridge  (re)create virtual bridge and re-publish to QubesDB
+#   --tags verify  check qvm-device bridge list output
+#
+# Order is intentional: agent first (net-interfaces must be running and have
+# qubesdb tooling), then admin (qubesd restart reads updated entry points),
+# then bridge (QubesDB publish triggers device-list-change in dom0 extension).
+
+- name: Populate dynamic inventory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Add net-interfaces to inventory
+      ansible.builtin.add_host:
+        name: "{{ net_interfaces_vm }}"
+        groups: net_interfaces_vms
+        ansible_connection: qubes
+      tags: [always]
+
+    - name: Add net-interfaces-bis to inventory
+      ansible.builtin.add_host:
+        name: "{{ net_interfaces_vm_b }}"
+        groups: net_interfaces_vms
+        ansible_connection: qubes
+      tags: [always]
+
+#
+# Agent: deploy publish-bridge + systemd service into net-interfaces.
+# net-interfaces must be running before this play.
+#
+- name: Deploy core-agent to net-interfaces
+  hosts: net_interfaces_vms
+  connection: qubes
+  gather_facts: false
+  remote_user: root
+  tags: [agent]
+  roles:
+    - deploy-agent
+
+#
+# Admin: install extension on dom0, restart qubesd.
+# SSH connection via sys-net survives: qubesd restart does not kill VMs.
+#
+- name: Deploy core-admin extension to dom0
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  tags: [admin]
+  roles:
+    - deploy-admin
+
+#
+# Bridge: create virtual bridge in net-interfaces, publish to QubesDB.
+# This triggers BridgeDeviceExtension.on_qdb_change in dom0 which fires
+# device-list-change:bridge so the device becomes visible immediately.
+#
+- name: Create and publish virtual bridge in net-interfaces
+  hosts: net_interfaces_vms
+  connection: qubes
+  gather_facts: false
+  remote_user: root
+  tags: [bridge]
+  roles:
+    - bridge-setup
+
+#
+# Verify: qvm-device bridge list net-interfaces must show br-dev.
+#
+- name: Verify bridge device is visible from dom0
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tags: [bridge, verify]
+  tasks:
+    - name: List bridge devices on net-interfaces
+      ansible.builtin.command: qvm-device bridge list {{ net_interfaces_vm }}
+      register: _bridge_list
+      changed_when: false
+
+    - name: Assert bridge device is listed
+      ansible.builtin.assert:
+        that:
+          - test_bridge_name in _bridge_list.stdout
+        fail_msg: >-
+          '{{ test_bridge_name }}' not found in qvm-device bridge list output:
+          {{ _bridge_list.stdout }}
+        success_msg: >-
+          OK -- bridge device '{{ test_bridge_name }}' is visible on
+          {{ net_interfaces_vm }}
+
+    - name: Show full qvm-device bridge list
+      ansible.builtin.debug:
+        msg: "{{ _bridge_list.stdout_lines }}"

@@ -1,0 +1,55 @@
+---
+
+ansible_python_interpreter: /usr/bin/python3
+
+#
+# Testbed AppVMs (backend and test VMs based on net_interfaces_template)
+#
+net_interfaces_vm: net-interfaces
+net_interfaces_vm_b: net-interfaces-bis
+net_interfaces_template: fedora-42-minimal
+net_interfaces_label: green
+net_interfaces_netvm: sys-firewall
+net_interfaces_packages:
+  - qubes-core-agent-networking
+  - qubes-core-agent-network-manager
+  - NetworkManager
+  - openssh-server
+  - qubes-core-agent-passwordless-root
+  - iputils
+  - nmap-ncat
+  - git
+  - python3
+  - python3-pip
+
+test_vms:
+  - testvm1
+  - testvm2
+  - testvm3
+  - testvm4
+  - testvm5
+  - testvm6
+
+#
+# Qubes policy
+#
+qubes_policy_dir: /etc/qubes/policy.d
+install_policy: true
+
+#
+# SSH authorized keys for dev access into net-interfaces.
+#
+dev_authorized_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtDX6ExAxtMRglsUe0rqBOB7a81djf6I77shLzxcZDY"
+
+#
+# Source tree paths (on dom0, where ansible runs).
+# Adjust if cloned elsewhere.
+#
+core_admin_src: /home/user/qubes-builderv2/artifacts/sources/core-admin-addon-bridge-device
+core_agent_src: /home/user/qubes-builderv2/artifacts/sources/core-agent-linux-addon-bridge-device
+
+#
+# Virtual bridge name created in net-interfaces for testing.
+#
+test_bridge_name: br-dev

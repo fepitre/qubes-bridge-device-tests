@@ -1,0 +1,19 @@
+---
+# Run this playbook from dom0.
+# Host names must match actual Qubes VM names.
+# Groups are populated dynamically from variables in group_vars/all.yml.
+
+all:
+  children:
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
+
+    # Populated dynamically from net_interfaces_vm variable.
+    net_interfaces_vms:
+      hosts: {}
+
+    # Populated dynamically from test_vms variable.
+    test_vms:
+      hosts: {}

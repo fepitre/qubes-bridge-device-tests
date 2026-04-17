@@ -1,0 +1,148 @@
+---
+- name: Install fedora-42-minimal template via qvm-template
+  ansible.builtin.command: >
+    qvm-template install {{ net_interfaces_template }}
+  args:
+    creates: /var/lib/qubes/vm-templates/{{ net_interfaces_template }}/root.img
+  tags: [vm]
+
+- name: Install packages in {{ net_interfaces_template }} template
+  ansible.builtin.command: >
+    qvm-run --no-gui -u root {{ net_interfaces_template }}
+    "dnf install -y {{ net_interfaces_packages | join(' ') }}"
+  changed_when: true
+  tags: [vm]
+
+- name: Enable NetworkManager service in {{ net_interfaces_template }} template
+  ansible.builtin.command: >
+    qvm-run --no-gui -u root {{ net_interfaces_template }}
+    "systemctl enable NetworkManager.service"
+  changed_when: true
+  tags: [vm]
+
+- name: Install agent scripts in {{ net_interfaces_template }} template
+  ansible.builtin.shell: |
+    cat {{ core_agent_src }}/network/{{ item.src }} | \
+    qvm-run --pass-io -u root {{ net_interfaces_template }} \
+    'cat > {{ item.dest }} && chmod {{ item.mode }} {{ item.dest }}'
+  loop:
+    - { src: publish-bridge, dest: /usr/lib/qubes/publish-bridge, mode: "0755" }
+    - { src: harden-bridge,  dest: /usr/lib/qubes/harden-bridge,  mode: "0755" }
+  changed_when: true
+  tags: [vm]
+
+- name: Install qubes-publish-bridges.service in {{ net_interfaces_template }} template
+  ansible.builtin.shell: |
+    cat {{ core_agent_src }}/systemd/qubes-publish-bridges.service | \
+    qvm-run --pass-io -u root {{ net_interfaces_template }} \
+    'cat > /usr/lib/systemd/system/qubes-publish-bridges.service'
+  changed_when: true
+  tags: [vm]
+
+- name: Enable qubes-publish-bridges and create NM dispatcher symlink in template
+  ansible.builtin.command: >
+    qvm-run --no-gui -u root {{ net_interfaces_template }}
+    "systemctl daemon-reload &&
+     systemctl enable qubes-publish-bridges.service &&
+     ln -sf /usr/lib/qubes/publish-bridge
+       /etc/NetworkManager/dispatcher.d/no-wait.d/qubes-bridge"
+  changed_when: true
+  tags: [vm]
+
+- name: Install admin extension on dom0
+  ansible.builtin.command:
+    cmd: python3 setup.py develop
+    chdir: "{{ core_admin_src }}"
+  changed_when: true
+  tags: [vm]
+
+- name: Restart qubesd to load bridge extension
+  ansible.builtin.systemd:
+    name: qubesd
+    state: restarted
+  tags: [vm]
+
+- name: Wait for qubesd to reinitialise
+  ansible.builtin.pause:
+    seconds: 5
+  tags: [vm]
+
+- name: Shut down {{ net_interfaces_template }} template after setup
+  ansible.builtin.command: qvm-shutdown --wait {{ net_interfaces_template }}
+  changed_when: true
+  tags: [vm]
+
+- name: Create net-interfaces AppVM
+  qubesos:
+    guest: "{{ net_interfaces_vm }}"
+    state: present
+    label: "{{ net_interfaces_label }}"
+    template: "{{ net_interfaces_template }}"
+    vmtype: AppVM
+    properties:
+      netvm: "{{ net_interfaces_netvm }}"
+  tags: [vm]
+
+- name: Enable sshd qubes service on net-interfaces
+  ansible.builtin.command: >
+    qvm-service {{ net_interfaces_vm }} sshd on
+  changed_when: true
+  tags: [vm]
+
+- name: Enable network-manager qubes service on net-interfaces
+  ansible.builtin.command: >
+    qvm-service {{ net_interfaces_vm }} network-manager on
+  changed_when: true
+  tags: [vm]
+
+- name: Create net-interfaces-bis AppVM
+  qubesos:
+    guest: "{{ net_interfaces_vm_b }}"
+    state: present
+    label: "{{ net_interfaces_label }}"
+    template: "{{ net_interfaces_template }}"
+    vmtype: AppVM
+    properties:
+      netvm: "{{ net_interfaces_netvm }}"
+  tags: [vm]
+
+- name: Enable sshd qubes service on net-interfaces-bis
+  ansible.builtin.command: >
+    qvm-service {{ net_interfaces_vm_b }} sshd on
+  changed_when: true
+  tags: [vm]
+
+- name: Enable network-manager qubes service on net-interfaces-bis
+  ansible.builtin.command: >
+    qvm-service {{ net_interfaces_vm_b }} network-manager on
+  changed_when: true
+  tags: [vm]
+
+- name: Create test AppVMs
+  qubesos:
+    guest: "{{ item }}"
+    state: present
+    label: blue
+    template: "{{ net_interfaces_template }}"
+    vmtype: AppVM
+    properties:
+      netvm: ""
+  loop: "{{ test_vms }}"
+  tags: [vm]
+
+- name: Enable network-manager qubes service on test VMs
+  ansible.builtin.command: >
+    qvm-service {{ item }} network-manager on
+  loop: "{{ test_vms }}"
+  changed_when: true
+  tags: [vm]
+
+- name: Install bridge device RPC policy
+  ansible.builtin.copy:
+    src: 90-admin-bridge-device.policy
+    dest: "{{ qubes_policy_dir }}/90-admin-bridge-device.policy"
+    owner: root
+    group: qubes
+    mode: "0664"
+  when: install_policy | bool
+  tags: [policy]

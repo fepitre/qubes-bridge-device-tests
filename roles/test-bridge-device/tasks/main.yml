@@ -1,0 +1,28 @@
+---
+- name: Bridge device -- discovery
+  ansible.builtin.include_tasks: discovery.yml
+  tags: [discovery]
+
+- name: Bridge device -- attach/detach lifecycle
+  ansible.builtin.include_tasks: attach.yml
+  tags: [attach]
+
+- name: Bridge device -- option validation and QDB entries
+  ansible.builtin.include_tasks: options.yml
+  tags: [options]
+
+- name: Bridge device -- persistent assignment
+  ansible.builtin.include_tasks: persistence.yml
+  tags: [persistence]
+
+- name: Bridge device -- domain lifecycle guards
+  ansible.builtin.include_tasks: lifecycle.yml
+  tags: [lifecycle]
+
+- name: Bridge device -- L2 connectivity and isolation
+  ansible.builtin.include_tasks: isolation.yml
+  tags: [isolation]
+
+- name: Bridge device -- bridge hardening
+  ansible.builtin.include_tasks: hardening.yml
+  tags: [hardening]

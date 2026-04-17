@@ -1,0 +1,161 @@
+---
+# Tests: attach options (mac, ip, netmask, gateway), QDB entries,
+# and validation errors for invalid inputs.
+#
+# Uses test_vm_a2 to avoid conflicting with attach.yml's test_vm_a1.
+
+- name: "[options] detach existing bridge from {{ test_vm_a2 }} if attached (setup)"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ test_vm_a2 }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+  register: pre_detach
+  failed_when: false
+  changed_when: pre_detach.rc == 0
+
+# explicit MAC
+
+- name: "[options] attach with explicit MAC option"
+  ansible.builtin.command: >
+    qvm-device bridge attach
+    -o mac={{ test_mac_explicit }}
+    {{ test_vm_a2 }} {{ test_backend_a }}:{{ test_bridge_a }}
+
+- name: "[options] explicit MAC appears in VM network interface"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a2 }}
+    'ip link show eth0'
+  register: ip_link
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_mac_explicit in ip_link.stdout
+    fail_msg: >-
+      Expected MAC {{ test_mac_explicit }} in eth0, got: {{ ip_link.stdout }}
+    success_msg: "OK -- explicit MAC is set on eth0"
+
+- name: "[options] detach before ip/netmask test"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ test_vm_a2 }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+
+# ip + netmask + gateway -> QDB net-config entries
+
+- name: "[options] attach with ip, netmask, and gateway"
+  ansible.builtin.command: >
+    qvm-device bridge attach
+    -o mac={{ test_mac_explicit }}
+    -o ip=192.168.100.200
+    -o netmask=255.255.255.0
+    -o gateway=192.168.100.1
+    {{ test_vm_a2 }} {{ test_backend_a }}:{{ test_bridge_a }}
+
+- name: "[options] /net-config/mac/ip written to frontend QubesDB"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a2 }}
+    'qubesdb-read /net-config/{{ test_mac_explicit }}/ip'
+  register: qdb_ip
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - qdb_ip.stdout.strip() == "192.168.100.200"
+    fail_msg: "QDB ip entry wrong: {{ qdb_ip.stdout }}"
+    success_msg: "OK -- /net-config/mac/ip = {{ qdb_ip.stdout.strip() }}"
+
+- name: "[options] /net-config/mac/netmask written to frontend QubesDB"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a2 }}
+    'qubesdb-read /net-config/{{ test_mac_explicit }}/netmask'
+  register: qdb_nm
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - qdb_nm.stdout.strip() == "255.255.255.0"
+    fail_msg: "QDB netmask entry wrong: {{ qdb_nm.stdout }}"
+    success_msg: "OK -- /net-config/mac/netmask = {{ qdb_nm.stdout.strip() }}"
+
+- name: "[options] /net-config/mac/gateway written to frontend QubesDB"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a2 }}
+    'qubesdb-read /net-config/{{ test_mac_explicit }}/gateway'
+  register: qdb_gw
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - qdb_gw.stdout.strip() == "192.168.100.1"
+    fail_msg: "QDB gateway entry wrong: {{ qdb_gw.stdout }}"
+    success_msg: "OK -- /net-config/mac/gateway = {{ qdb_gw.stdout.strip() }}"
+
+- name: "[options] QDB net-config entries removed after detach"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ test_vm_a2 }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+
+- name: "[options] /net-config/mac/ip gone after detach"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_vm_a2 }}
+    'qubesdb-read /net-config/{{ test_mac_explicit }}/ip'
+  register: qdb_gone
+  failed_when: false
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - qdb_gone.rc != 0 or qdb_gone.stdout.strip() == ""
+    fail_msg: "QDB ip entry still present after detach: {{ qdb_gone.stdout }}"
+    success_msg: "OK -- QDB ip entry removed after detach"
+
+# validation errors
+
+- name: "[options] attach with invalid MAC is rejected"
+  ansible.builtin.command: >
+    qvm-device bridge attach
+    -o mac=NOTAMAC
+    {{ test_vm_a2 }} {{ test_backend_a }}:{{ test_bridge_a }}
+  register: bad_mac
+  failed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - bad_mac.rc != 0
+      - "'Invalid MAC' in bad_mac.stderr or 'Invalid MAC' in bad_mac.stdout"
+    fail_msg: "Expected rejection for invalid MAC, got rc={{ bad_mac.rc }}"
+    success_msg: "OK -- invalid MAC rejected"
+
+- name: "[options] attach with invalid IP is rejected"
+  ansible.builtin.command: >
+    qvm-device bridge attach
+    -o ip=NOTANIP
+    -o netmask=255.255.255.0
+    {{ test_vm_a2 }} {{ test_backend_a }}:{{ test_bridge_a }}
+  register: bad_ip
+  failed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - bad_ip.rc != 0
+    fail_msg: "Expected rejection for invalid IP, got rc={{ bad_ip.rc }}"
+    success_msg: "OK -- invalid IP rejected"
+
+- name: "[options] attach with unknown option is rejected"
+  ansible.builtin.command: >
+    qvm-device bridge attach
+    -o colour=red
+    {{ test_vm_a2 }} {{ test_backend_a }}:{{ test_bridge_a }}
+  register: bad_opt
+  failed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - bad_opt.rc != 0
+    fail_msg: "Expected rejection for unknown option, got rc={{ bad_opt.rc }}"
+    success_msg: "OK -- unknown option rejected"
+
+- name: "[options] restore testbed state -- re-attach if was attached before"
+  ansible.builtin.command: >
+    qvm-device bridge attach {{ test_vm_a2 }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+  when: pre_detach.rc != 0

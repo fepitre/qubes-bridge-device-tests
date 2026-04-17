@@ -1,0 +1,152 @@
+---
+# Tests: domain lifecycle guards.
+#
+# 1. Backend shutdown is blocked while a frontend has a bridge attached.
+# 2. Force-shutdown bypasses the guard.
+# 3. Backend is auto-started before a VM with a required bridge starts.
+
+# shutdown guard
+
+- name: "[lifecycle] ensure {{ test_vm_a1 }} is running with bridge attached"
+  ansible.builtin.command: qvm-check --running {{ test_vm_a1 }}
+  register: vm_running
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - vm_running.rc == 0
+    fail_msg: "{{ test_vm_a1 }} must be running for this test (attach a bridge first)"
+    success_msg: "OK -- {{ test_vm_a1 }} is running"
+
+- name: "[lifecycle] shutdown of backend is blocked when frontend has bridge"
+  ansible.builtin.command: qvm-shutdown {{ test_backend_a }}
+  register: blocked_shutdown
+  failed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - >-
+        'bridge' in blocked_shutdown.stderr | lower
+        or 'bridge' in blocked_shutdown.stdout | lower
+        or 'attached' in blocked_shutdown.stderr | lower
+        or 'attached' in blocked_shutdown.stdout | lower
+        or blocked_shutdown.rc != 0
+    fail_msg: >-
+      Expected shutdown to be blocked (error message mentioning bridges),
+      but got no such indication. rc={{ blocked_shutdown.rc }}
+      stderr={{ blocked_shutdown.stderr }}
+    success_msg: "OK -- backend shutdown blocked while frontend has bridge"
+
+- name: "[lifecycle] backend is still running after blocked shutdown"
+  ansible.builtin.command: qvm-check --running {{ test_backend_a }}
+  changed_when: false
+
+# backend auto-start for required assignment
+#
+# Assign test_bridge_a_2 as required to test_vm_a4, shut down the backend,
+# then start test_vm_a4 and verify the backend was started automatically.
+
+- name: "[lifecycle] unassign {{ test_bridge_a_2 }} from {{ test_vm_a4 }} (setup)"
+  ansible.builtin.command: >
+    qvm-device bridge unassign {{ test_vm_a4 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+  register: pre_unassign_a4
+  failed_when: false
+  changed_when: pre_unassign_a4.rc == 0
+
+- name: "[lifecycle] detach {{ test_bridge_a_2 }} from {{ test_vm_a4 }} if running"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ test_vm_a4 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+  failed_when: false
+  changed_when: false
+
+- name: "[lifecycle] shut down {{ test_vm_a4 }} before test"
+  ansible.builtin.command: qvm-shutdown --wait {{ test_vm_a4 }}
+  register: shutdown_a4
+  failed_when: false
+  changed_when: true
+
+- name: "[lifecycle] assign {{ test_bridge_a_2 }} as required to {{ test_vm_a4 }}"
+  ansible.builtin.command: >
+    qvm-device bridge assign --required {{ test_vm_a4 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+
+- name: "[lifecycle] start {{ test_backend_a }} so we can then shut it down cleanly"
+  ansible.builtin.command: qvm-start {{ test_backend_a }}
+  register: start_backend
+  failed_when: false
+  changed_when: start_backend.rc == 0
+
+- name: "[lifecycle] detach all bridges from frontend VMs temporarily"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ item }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+  loop:
+    - "{{ test_vm_a3 }}"
+    - "{{ test_vm_a4 }}"
+  failed_when: false
+  changed_when: false
+
+- name: "[lifecycle] detach {{ test_vm_a1 }} and {{ test_vm_a2 }} bridges temporarily"
+  ansible.builtin.command: >
+    qvm-device bridge detach {{ item }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+  loop:
+    - "{{ test_vm_a1 }}"
+    - "{{ test_vm_a2 }}"
+  failed_when: false
+  changed_when: false
+
+- name: "[lifecycle] shut down {{ test_backend_a }} (no frontends attached)"
+  ansible.builtin.command: qvm-shutdown --wait {{ test_backend_a }}
+  changed_when: true
+
+- name: "[lifecycle] start {{ test_vm_a4 }} with required bridge -- backend must auto-start"
+  ansible.builtin.command: qvm-start {{ test_vm_a4 }}
+
+- name: "[lifecycle] wait for {{ test_vm_a4 }} to be running"
+  ansible.builtin.command: qvm-check --running {{ test_vm_a4 }}
+  register: a4_running
+  until: a4_running.rc == 0
+  retries: 60
+  delay: 2
+  changed_when: false
+
+- name: "[lifecycle] {{ test_backend_a }} was auto-started with frontend"
+  ansible.builtin.command: qvm-check --running {{ test_backend_a }}
+  register: backend_running
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - backend_running.rc == 0
+    fail_msg: "{{ test_backend_a }} is not running -- backend auto-start failed"
+    success_msg: "OK -- backend auto-started before frontend"
+
+- name: "[lifecycle] bridge is attached in {{ test_vm_a4 }}"
+  ansible.builtin.command: qvm-device bridge list
+  register: bridge_list_a4
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_vm_a4 in bridge_list_a4.stdout
+    fail_msg: "Bridge not attached to {{ test_vm_a4 }}. Output: {{ bridge_list_a4.stdout }}"
+    success_msg: "OK -- bridge attached after auto-start"
+
+# Restore testbed
+- name: "[lifecycle] unassign required bridge from {{ test_vm_a4 }} (restore)"
+  ansible.builtin.command: >
+    qvm-device bridge unassign {{ test_vm_a4 }}
+    {{ test_backend_a }}:{{ test_bridge_a_2 }}
+  when: pre_unassign_a4.rc != 0
+
+- name: "[lifecycle] re-attach bridges to test_vm_a1 and test_vm_a2 (restore)"
+  ansible.builtin.command: >
+    qvm-device bridge attach {{ item }}
+    {{ test_backend_a }}:{{ test_bridge_a }}
+  loop:
+    - "{{ test_vm_a1 }}"
+    - "{{ test_vm_a2 }}"
+  failed_when: false

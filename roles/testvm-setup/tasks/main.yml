@@ -1,0 +1,35 @@
+---
+- name: Ensure /rw/config/NM-system-connections exists
+  ansible.builtin.file:
+    path: /rw/config/NM-system-connections
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write NM keyfile for eth0
+  ansible.builtin.template:
+    src: bridge-eth0.nmconnection.j2
+    dest: /rw/config/NM-system-connections/bridge-eth0.nmconnection
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Reload NM connections
+  ansible.builtin.command: nmcli connection reload
+  changed_when: false
+  failed_when: false
+
+- name: Install NM dispatcher for bridge-device firewall
+  ansible.builtin.copy:
+    src: bridge-device-firewall
+    dest: /etc/NetworkManager/dispatcher.d/no-wait.d/bridge-device-firewall
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Symlink /usr/local/bin/ping -> /usr/bin/ping
+  ansible.builtin.file:
+    src: /usr/bin/ping
+    dest: /usr/local/bin/ping
+    state: link

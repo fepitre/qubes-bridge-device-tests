@@ -1,0 +1,30 @@
+---
+# Backend VMs and their bridges
+test_backend_a: net-interfaces
+test_bridge_a: br-dev
+test_bridge_a_2: br-dev-2
+
+test_backend_b: net-interfaces-bis
+test_bridge_b: br-dev
+
+# Frontend VMs -- must exist and be configured before running tests
+# a1/a2 share test_bridge_a, a3/a4 share test_bridge_a_2
+# b1/b2 share test_bridge_b on a different backend
+test_vm_a1: testvm1
+test_vm_a2: testvm2
+test_vm_a3: testvm3
+test_vm_a4: testvm4
+test_vm_b1: testvm5
+test_vm_b2: testvm6
+
+# IPs assigned in bridge-eth0-up.sh on each VM
+test_ip_a1: "192.168.100.1"
+test_ip_a2: "192.168.100.2"
+test_ip_a3: "192.168.101.1"
+test_ip_b1: "192.168.102.1"
+
+# ping binary path (copied into VMs during testbed setup)
+ping_bin: /usr/local/bin/ping
+
+# MAC used in the explicit-MAC option test
+test_mac_explicit: "00:16:3e:aa:bb:cc"

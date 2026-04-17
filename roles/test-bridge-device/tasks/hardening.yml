@@ -1,0 +1,162 @@
+---
+# Tests: harden-bridge settings applied to the bridge in the backend VM.
+# Checks sysctls, bridge parameters, and nftables tables.
+
+- name: "[hardening] bridge-nf-call-iptables = 0"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'cat /proc/sys/net/bridge/bridge-nf-call-iptables'
+  register: nf_ip
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - nf_ip.stdout.strip() == "0"
+    fail_msg: >-
+      bridge-nf-call-iptables is {{ nf_ip.stdout.strip() }}, expected 0.
+      Masquerade may rewrite bridged traffic source IPs.
+    success_msg: "OK -- bridge-nf-call-iptables = 0"
+
+- name: "[hardening] bridge-nf-call-ip6tables = 0"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'cat /proc/sys/net/bridge/bridge-nf-call-ip6tables'
+  register: nf_ip6
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - nf_ip6.stdout.strip() == "0"
+    fail_msg: "bridge-nf-call-ip6tables is {{ nf_ip6.stdout.strip() }}, expected 0"
+    success_msg: "OK -- bridge-nf-call-ip6tables = 0"
+
+- name: "[hardening] bridge-nf-call-arptables = 0"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'cat /proc/sys/net/bridge/bridge-nf-call-arptables'
+  register: nf_arp
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - nf_arp.stdout.strip() == "0"
+    fail_msg: "bridge-nf-call-arptables is {{ nf_arp.stdout.strip() }}, expected 0"
+    success_msg: "OK -- bridge-nf-call-arptables = 0"
+
+- name: "[hardening] STP is disabled on {{ test_bridge_a }}"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'cat /sys/class/net/{{ test_bridge_a }}/bridge/stp_state'
+  register: stp_state
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - stp_state.stdout.strip() == "0"
+    fail_msg: "STP is enabled on {{ test_bridge_a }} (stp_state={{ stp_state.stdout.strip() }})"
+    success_msg: "OK -- STP disabled on {{ test_bridge_a }}"
+
+- name: "[hardening] FDB ageing_time = 3000 (30s) on {{ test_bridge_a }}"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'cat /sys/class/net/{{ test_bridge_a }}/bridge/ageing_time'
+  register: age_time
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - age_time.stdout.strip() == "3000"
+    fail_msg: "ageing_time = {{ age_time.stdout.strip() }}, expected 3000"
+    success_msg: "OK -- ageing_time = 3000 centiseconds"
+
+- name: "[hardening] IGMP snooping disabled on {{ test_bridge_a }}"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'cat /sys/class/net/{{ test_bridge_a }}/bridge/multicast_snooping'
+  register: mc_snoop
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - mc_snoop.stdout.strip() == "0"
+    fail_msg: "multicast_snooping = {{ mc_snoop.stdout.strip() }}, expected 0"
+    success_msg: "OK -- IGMP/MLD snooping disabled"
+
+- name: "[hardening] nftables bridge qubes-isolation table exists"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'nft list table bridge qubes-isolation'
+  register: nft_bridge
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - nft_bridge.rc == 0
+      - "'vif-in' in nft_bridge.stdout"
+    fail_msg: "bridge qubes-isolation table missing or incomplete: {{ nft_bridge.stdout }}"
+    success_msg: "OK -- bridge qubes-isolation table present with vif-in chain"
+
+- name: "[hardening] ARP rate-limit meter in bridge table"
+  ansible.builtin.assert:
+    that:
+      - "'arp-ratelimit' in nft_bridge.stdout"
+    fail_msg: "arp-ratelimit meter not found in bridge qubes-isolation"
+    success_msg: "OK -- ARP rate-limit meter present"
+
+- name: "[hardening] DHCP rate-limit meter in bridge table"
+  ansible.builtin.assert:
+    that:
+      - "'dhcp-ratelimit' in nft_bridge.stdout"
+    fail_msg: "dhcp-ratelimit meter not found in bridge qubes-isolation"
+    success_msg: "OK -- DHCP rate-limit meter present"
+
+- name: "[hardening] IPv6 RA/RS drop rule in bridge table"
+  ansible.builtin.assert:
+    that:
+      - >-
+        ('133' in nft_bridge.stdout or 'nd-router-solicit' in nft_bridge.stdout)
+        and
+        ('134' in nft_bridge.stdout or 'nd-router-advert' in nft_bridge.stdout)
+    fail_msg: "RA/RS drop rule (type 133/134) not found in bridge qubes-isolation"
+    success_msg: "OK -- IPv6 RA/RS drop rules present"
+
+- name: "[hardening] nftables inet qubes-bridge-forward table exists"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'nft list table inet qubes-bridge-forward'
+  register: nft_inet
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - nft_inet.rc == 0
+      - "'br-*' in nft_inet.stdout"
+    fail_msg: "inet qubes-bridge-forward table missing or incomplete: {{ nft_inet.stdout }}"
+    success_msg: "OK -- inet qubes-bridge-forward table present"
+
+- name: "[hardening] proxy_arp disabled on {{ test_bridge_a }}"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'cat /proc/sys/net/ipv4/conf/{{ test_bridge_a }}/proxy_arp'
+  register: proxy_arp
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - proxy_arp.stdout.strip() == "0"
+    fail_msg: "proxy_arp = {{ proxy_arp.stdout.strip() }}, expected 0"
+    success_msg: "OK -- proxy_arp disabled"
+
+- name: "[hardening] harden-bridge settings also applied to second backend"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_b }}
+    'cat /proc/sys/net/bridge/bridge-nf-call-iptables'
+  register: nf_ip_b
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - nf_ip_b.stdout.strip() == "0"
+    fail_msg: >-
+      bridge-nf-call-iptables = {{ nf_ip_b.stdout.strip() }} on {{ test_backend_b }}, expected 0
+    success_msg: "OK -- bridge-nf-call-iptables = 0 on {{ test_backend_b }}"

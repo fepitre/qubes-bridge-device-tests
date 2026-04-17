@@ -1,0 +1,70 @@
+---
+# Tests: device discovery via QubesDB and qvm-device bridge list.
+
+- name: "[discovery] qvm-device bridge list shows bridge from backend"
+  ansible.builtin.command: qvm-device bridge list {{ test_backend_a }}
+  register: bridge_list
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_bridge_a in bridge_list.stdout
+    fail_msg: >-
+      {{ test_bridge_a }} not found in qvm-device bridge list {{ test_backend_a }}.
+      Output: {{ bridge_list.stdout }}
+    success_msg: "OK -- {{ test_backend_a }}:{{ test_bridge_a }} is listed"
+
+- name: "[discovery] second bridge on same backend is listed"
+  ansible.builtin.assert:
+    that:
+      - test_bridge_a_2 in bridge_list.stdout
+    fail_msg: >-
+      {{ test_bridge_a_2 }} not found. Output: {{ bridge_list.stdout }}
+    success_msg: "OK -- {{ test_backend_a }}:{{ test_bridge_a_2 }} is listed"
+
+- name: "[discovery] bridge on second backend is listed"
+  ansible.builtin.command: qvm-device bridge list {{ test_backend_b }}
+  register: bridge_list_b
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_bridge_b in bridge_list_b.stdout
+    fail_msg: >-
+      {{ test_bridge_b }} not found on {{ test_backend_b }}.
+      Output: {{ bridge_list_b.stdout }}
+    success_msg: "OK -- {{ test_backend_b }}:{{ test_bridge_b }} is listed"
+
+- name: "[discovery] QubesDB path exists in backend VM"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'qubesdb-read /qubes-bridge-devices/{{ test_bridge_a }}/desc'
+  register: qdb_desc
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - qdb_desc.rc == 0
+      - qdb_desc.stdout | length > 0
+    fail_msg: "QubesDB /qubes-bridge-devices/{{ test_bridge_a }}/desc is empty or missing"
+    success_msg: "OK -- QDB desc: {{ qdb_desc.stdout }}"
+
+- name: "[discovery] description contains the bridge name"
+  ansible.builtin.assert:
+    that:
+      - test_bridge_a in qdb_desc.stdout
+    fail_msg: "Bridge name not in description: {{ qdb_desc.stdout }}"
+    success_msg: "OK -- description mentions bridge name"
+
+- name: "[discovery] backend QDB lists the bridge entry"
+  ansible.builtin.command: >
+    qvm-run --pass-io --user root {{ test_backend_a }}
+    'qubesdb-list /qubes-bridge-devices/'
+  register: qdb_list
+  changed_when: false
+
+- ansible.builtin.assert:
+    that:
+      - test_bridge_a in qdb_list.stdout
+    fail_msg: "Expected {{ test_bridge_a }} in QDB list, got: {{ qdb_list.stdout }}"
+    success_msg: "OK -- QDB entry present for {{ test_bridge_a }}"

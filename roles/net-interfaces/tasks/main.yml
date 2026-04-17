@@ -1,0 +1,41 @@
+---
+- name: Create sshd systemd drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/sshd.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write qubes-service drop-in for sshd
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/sshd.service.d/30-qubes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      ConditionPathExists=/var/run/qubes-service/sshd
+
+- name: Enable sshd
+  ansible.builtin.systemd:
+    name: sshd
+    enabled: true
+
+- name: Ensure .ssh directory exists for user
+  ansible.builtin.file:
+    path: /home/user/.ssh
+    state: directory
+    owner: user
+    group: user
+    mode: "0700"
+  when: dev_authorized_keys | length > 0
+
+- name: Install authorized_keys for dev access
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: /home/user/.ssh/authorized_keys
+    owner: user
+    group: user
+    mode: "0600"
+  when: dev_authorized_keys | length > 0
