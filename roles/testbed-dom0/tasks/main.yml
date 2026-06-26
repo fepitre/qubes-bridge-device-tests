@@ -1,5 +1,5 @@
 ---
-- name: Install fedora-42-minimal template via qvm-template
+- name: Install {{ net_interfaces_template }} template via qvm-template
   ansible.builtin.command: >
     qvm-template install {{ net_interfaces_template }}
   args:

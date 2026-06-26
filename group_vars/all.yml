@@ -7,7 +7,7 @@ ansible_python_interpreter: /usr/bin/python3
 #
 net_interfaces_vm: net-interfaces
 net_interfaces_vm_b: net-interfaces-bis
-net_interfaces_template: fedora-42-minimal
+net_interfaces_template: fedora-43-minimal
 net_interfaces_label: green
 net_interfaces_netvm: sys-firewall
 net_interfaces_packages:
