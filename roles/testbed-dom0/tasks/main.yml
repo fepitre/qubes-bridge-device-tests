@@ -42,10 +42,7 @@
 - name: Enable qubes-publish-bridges and create NM dispatcher symlink in template
   ansible.builtin.command: >
     qvm-run --no-gui -u root {{ net_interfaces_template }}
-    "systemctl daemon-reload &&
-     systemctl enable qubes-publish-bridges.service &&
-     ln -sf /usr/lib/qubes/publish-bridge
-       /etc/NetworkManager/dispatcher.d/no-wait.d/qubes-bridge"
+    "systemctl daemon-reload && systemctl enable qubes-publish-bridges.service && ln -sf /usr/lib/qubes/publish-bridge /etc/NetworkManager/dispatcher.d/no-wait.d/qubes-bridge"
   changed_when: true
   tags: [vm]
 
